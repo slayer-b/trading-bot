@@ -29,14 +29,6 @@ public class TradingBotConfiguration {
     }
 
     /**
-     * Регистрирует стратегию "Пробой и Ретест" как Pluggable компонент.
-     */
-    @Bean
-    public TradingStrategy breakoutRetestStrategy() {
-        return new BreakoutRetestStrategy();
-    }
-
-    /**
      * Создает репозиторий для загрузки исторических 5м свечей через REST API OKX.
      */
     @Bean

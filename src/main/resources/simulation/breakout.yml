@@ -1,12 +1,5 @@
-bot:
-  name: breakout_retest_daily_15m_5m
 trading:
-  market: binance-notrade
+  market: binance-notrade # Или ваш текущий активный маркет-эмулятор
   symbol: SOLUSDT
-  strategyName: breakout_retest_daily_15m_5m
-  candleTimeframeMinutes: 1
-  strategyParams:
-    macd:
-      fastPeriod: 6
-      slowPeriod: 13
-      signalPeriod: 5
+  strategyName: breakout_retest_daily_15m_5m # Строго совпадает с методом name()
+  candleTimeframeMinutes: 5 # Движок сам будет поставлять 5-минутные закрытые свечи
