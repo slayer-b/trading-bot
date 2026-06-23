@@ -1,0 +1,12 @@
+bot:
+  name: breakout_retest_daily_15m_5m
+trading:
+  market: binance-notrade
+  symbol: SOLUSDT
+  strategyName: breakout_retest_daily_15m_5m
+  candleTimeframeMinutes: 1
+  strategyParams:
+    macd:
+      fastPeriod: 6
+      slowPeriod: 13
+      signalPeriod: 5

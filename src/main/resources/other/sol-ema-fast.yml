@@ -1,0 +1,11 @@
+bot:
+  name: sol-ema-fast
+trading:
+  market: binance-notrade
+  symbol: SOLUSDT
+  strategyName: ema
+  candleTimeframeMinutes: 1
+  strategyParams:
+    ema:
+      fastPeriod: 3
+      slowPeriod: 8

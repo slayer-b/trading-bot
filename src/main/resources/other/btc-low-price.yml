@@ -1,0 +1,12 @@
+# BTC fast EMA — designed to complete multiple round-trips in 30 min
+bot:
+  name: low-Price
+trading:
+  market: binance-notrade
+  symbol: BTCUSDT
+  strategyName: lowprice
+  candleTimeframeMinutes: 1
+  strategyParams:
+    ema:
+      fastPeriod: 3
+      slowPeriod: 8

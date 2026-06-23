@@ -1,0 +1,12 @@
+bot:
+  name: xrp-rsi
+trading:
+  market: binance-notrade
+  symbol: XRPUSDT
+  strategyName: rsi
+  candleTimeframeMinutes: 1
+  strategyParams:
+    rsi:
+      period: 7
+      oversold: 35.0
+      overbought: 65.0

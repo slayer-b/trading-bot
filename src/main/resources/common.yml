@@ -1,0 +1,122 @@
+# =============================================================================
+# COMMON CONFIGURATION — inherited by all bots in current/*.yml
+# =============================================================================
+
+trading:
+
+  simulation:
+    durationMinutes: 30
+    initialUsdt: 10000
+    usdtAmount: 100
+
+  market: binance-notrade
+  #symbol: BTCUSDT
+  #strategyName: ema
+  candleTimeframeMinutes: 1
+
+  volumeFilter:
+    lookback: 0
+    threshold: 1.2
+
+  account:
+    historyCapacity: 200
+    quoteAsset: USDT
+
+  strategyParams:
+    ema:
+      fastPeriod: 9
+      slowPeriod: 21
+    rsi:
+      period: 14
+      oversold: 30.0
+      overbought: 70.0
+    macd:
+      fastPeriod: 12
+      slowPeriod: 26
+      signalPeriod: 9
+    emaRsi:
+      emaFastPeriod: 9
+      emaSlowPeriod: 21
+      rsiPeriod: 14
+      oversold: 35.0
+      overbought: 65.0
+    orderBookImbalance:
+      depth: 10
+      buyThreshold: 0.65
+      sellThreshold: 0.35
+      confirmationTicks: 3
+      minSpreadBps: 5.0
+
+  binance:
+    apiKey: ""
+    secretKey: ""
+    commissionRate: 0.001
+
+  binanceAlpha:
+    apiKey: ""
+    secretKey: ""
+    commissionRate: 0.001
+
+  okx:
+    apiKey: ""
+    secretKey: ""
+    passphrase: ""
+    commissionRate: 0.001
+
+  binanceFutures:
+    apiKey: ""
+    secretKey: ""
+    commissionRate: 0.0004
+    hedgeMode: false
+
+  okxFutures:
+    apiKey: ""
+    secretKey: ""
+    passphrase: ""
+    commissionRate: 0.0005
+    hedgeMode: false
+
+  urls:
+    binance:
+      wsBase:      "wss://stream.binance.com:9443/ws"
+      restBase:    "https://api.binance.com"
+      tickPath:    "{symbol}@bookTicker"
+      accountPath: "/api/v3/account"
+      orderPath:   "/api/v3/order"
+
+    binanceAlpha:
+      wsBase:      "wss://stream.binance.com:9443/ws"
+      restBase:    "https://api.binance.com"
+      tickPath:    "{symbol}@bookTicker"
+      accountPath: "/api/v3/account"
+      orderPath:   "/api/v3/order"
+
+    okx:
+      wsBase:      "wss://ws.okx.com:8443/ws/v5/public"
+      restBase:    "https://www.okx.com"
+      tickPath:    ""
+      accountPath: "/api/v5/account/balance"
+      orderPath:   "/api/v5/trade/order"
+
+    binanceFutures:
+      wsBase:      "wss://fstream.binance.com/ws"
+      restBase:    "https://fapi.binance.com"
+      tickPath:    "{symbol}@bookTicker"
+      accountPath: "/fapi/v2/account"
+      orderPath:   "/fapi/v1/order"
+
+    okxFutures:
+      wsBase:      "wss://ws.okx.com:8443/ws/v5/public"
+      restBase:    "https://www.okx.com"
+      tickPath:    ""
+      accountPath: "/api/v5/account/balance"
+      orderPath:   "/api/v5/trade/order"
+
+spring:
+  main:
+    web-application-type: reactive
+
+logging:
+  level:
+    com.tradingbot: INFO
+    reactor.netty:  WARN

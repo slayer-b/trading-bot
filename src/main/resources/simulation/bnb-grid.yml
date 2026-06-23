@@ -1,0 +1,12 @@
+bot:
+  name: bnb-grid-ema-trend
+trading:
+  market: binance-notrade
+  symbol: BTCUSDT
+  strategyName: Grid-Ema-Trend
+  candleTimeframeMinutes: 1
+  strategyParams:
+    macd:
+      fastPeriod: 6
+      slowPeriod: 13
+      signalPeriod: 5

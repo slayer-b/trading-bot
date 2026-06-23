@@ -1,0 +1,11 @@
+bot:
+  name: eth-ema-fast
+trading:
+  market: binance-notrade
+  symbol: ETHUSDT
+  strategyName: ema
+  candleTimeframeMinutes: 1
+  strategyParams:
+    ema:
+      fastPeriod: 3
+      slowPeriod: 8
