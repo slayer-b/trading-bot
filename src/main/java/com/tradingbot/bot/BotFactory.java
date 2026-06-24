@@ -155,6 +155,7 @@ public class BotFactory {
     private TradingStrategy buildStrategy(BotConfig c) {
         return switch (c.strategyName().toLowerCase()) {
             case "breakout_retest_daily_15m_5m" -> new BreakoutRetestStrategy();
+            case "retest_daily_15m_5m" -> new BreakoutRetestStrategy();
             case "grid-ema-trend"      -> new GridEmaTradingStrategy(10.0, 10.0, 5, 5, "BNBUSDT");
             case "ema"                 -> new MovingAverageCrossStrategy(c.emaFast(), c.emaSlow(), c.usdtAmount());
             case "rsi"                 -> new RsiStrategy(c.rsiPeriod(), c.rsiOversold(), c.rsiOverbought(), c.usdtAmount());

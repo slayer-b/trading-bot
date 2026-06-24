@@ -20,7 +20,9 @@ import java.util.Map;
 public class OkxHistoricalCandleRepository implements HistoricalCandleRepository {
 
     private final WebClient webClient;
-    private static final String OKX_API_URL = "https://okx.com";
+//    private static final String OKX_API_URL = "https://www.okx.com";
+    private static final String OKX_API_URL = "https://okcn.com";
+
 
     public OkxHistoricalCandleRepository(WebClient.Builder webClientBuilder) {
         this.webClient = webClientBuilder.baseUrl(OKX_API_URL).build();
