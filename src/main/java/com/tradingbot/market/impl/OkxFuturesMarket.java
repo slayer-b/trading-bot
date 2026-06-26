@@ -1,7 +1,8 @@
-package com.tradingbot.market;
+package com.tradingbot.market.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tradingbot.market.FuturesMarket;
 import com.tradingbot.market.config.MarketUrls;
 import com.tradingbot.model.AccountState;
 import com.tradingbot.model.Order;
@@ -29,19 +30,20 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Live OKX market implementation.
+ * OKX USDT-M Perpetual Swap futures market.
  *
- * <p>Ticks: public WebSocket {@code /ws/v5/public}, subscribing to
- * {@code tickers} channel for the instrument.
+ * <p>Uses OKX swap instrument type: instType=SWAP, e.g. BTC-USDT-SWAP.
  *
- * <p>Account + orders: private REST {@code /api/v5/account/balance} and
- * {@code /api/v5/trade/order}, signed with HMAC-SHA256 + Base64.
- *
- * <p>All URLs come from {@link MarketUrls} — nothing is hardcoded.
+ * <p>Supports:
+ * <ul>
+ *   <li>One-way mode  — {@code posSide = net}</li>
+ *   <li>Hedge mode    — {@code posSide = long | short}</li>
+ *   <li>Per-order leverage via {@link #setLeverage}</li>
+ * </ul>
  */
-public class OkxMarket implements Market {
+public class OkxFuturesMarket implements FuturesMarket {
 
-    private static final Logger log = LoggerFactory.getLogger(OkxMarket.class);
+    private static final Logger log = LoggerFactory.getLogger(OkxFuturesMarket.class);
     private static final DateTimeFormatter ISO_UTC =
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
@@ -53,10 +55,10 @@ public class OkxMarket implements Market {
     private final String       passphrase;
     private final BigDecimal   commissionRate;
 
-    public OkxMarket(WebClient webClient, ObjectMapper objectMapper,
-                     MarketUrls urls,
-                     String apiKey, String secretKey, String passphrase,
-                     BigDecimal commissionRate) {
+    public OkxFuturesMarket(WebClient webClient, ObjectMapper objectMapper,
+                             MarketUrls urls,
+                             String apiKey, String secretKey, String passphrase,
+                             BigDecimal commissionRate) {
         this.webClient      = webClient;
         this.objectMapper   = objectMapper;
         this.urls           = urls;
@@ -66,32 +68,27 @@ public class OkxMarket implements Market {
         this.commissionRate = commissionRate;
     }
 
-    @Override
-    public String name() { return "OKX"; }
-
-    @Override
-    public BigDecimal commissionRate() { return commissionRate; }
+    @Override public String     name()           { return "OKX Futures"; }
+    @Override public BigDecimal commissionRate() { return commissionRate; }
 
     // -------------------------------------------------------------------------
-    // Tick stream — OKX public WS, tickers channel
+    // Tick stream — OKX public WS tickers channel
     // -------------------------------------------------------------------------
 
     @Override
     public Flux<Tick> tickStream(String symbol) {
-        // OKX uses instrument ids like "BTC-USDT", not "BTCUSDT"
-        String instId = toOkxSymbol(symbol);
-        URI uri = URI.create(urls.wsBase() + urls.tickPath().replace("{symbol}", instId));
-        Sinks.Many<Tick> sink = Sinks.many().multicast().onBackpressureBuffer();
-        ReactorNettyWebSocketClient wsClient = new ReactorNettyWebSocketClient();
-
-        // Subscribe message sent after WS connects
-        String subscribeMsg = """
+        String instId   = toSwapSymbol(symbol);
+        URI    uri      = URI.create(urls.wsBase());
+        String subMsg   = """
             {"op":"subscribe","args":[{"channel":"tickers","instId":"%s"}]}
             """.formatted(instId).strip();
 
+        Sinks.Many<Tick> sink = Sinks.many().multicast().onBackpressureBuffer();
+        ReactorNettyWebSocketClient wsClient = new ReactorNettyWebSocketClient();
+
         return Flux.defer(() -> {
             wsClient.execute(uri, session ->
-                session.send(Mono.just(session.textMessage(subscribeMsg)))
+                session.send(Mono.just(session.textMessage(subMsg)))
                     .thenMany(session.receive()
                         .map(msg -> msg.getPayloadAsText())
                         .filter(json -> json.contains("\"tickers\""))
@@ -103,8 +100,8 @@ public class OkxMarket implements Market {
         })
         .retryWhen(reactor.util.retry.Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
             .maxBackoff(Duration.ofSeconds(30))
-            .doBeforeRetry(sig ->
-                log.warn("[OKX] WS disconnected, retrying: {}", sig.failure().getMessage())));
+            .doBeforeRetry(s ->
+                log.warn("[OKX Futures] WS disconnected, retrying: {}", s.failure().getMessage())));
     }
 
     private Mono<Tick> parseTick(String json, String symbol) {
@@ -113,7 +110,6 @@ public class OkxMarket implements Market {
             JsonNode data = root.path("data");
             if (!data.isArray() || data.isEmpty()) return null;
             JsonNode d = data.get(0);
-            // OKX tickers fields: bidPx, askPx, last, vol24h
             return Tick.builder()
                 .symbol(symbol)
                 .bid(new BigDecimal(d.get("bidPx").asText()))
@@ -123,28 +119,27 @@ public class OkxMarket implements Market {
                 .timestamp(Instant.now())
                 .build();
         }).onErrorResume(e -> {
-            log.error("[OKX] Failed to parse tick: {}", e.getMessage());
+            log.error("[OKX Futures] Tick parse error: {}", e.getMessage());
             return Mono.empty();
         }).filter(t -> t != null);
     }
 
     // -------------------------------------------------------------------------
-    // Order book stream — OKX books channel
+    // Order book stream — OKX swap books channel
     // -------------------------------------------------------------------------
 
     @Override
     public Flux<OrderBook> orderBookStream(String symbol, int depth) {
-        String instId    = toOkxSymbol(symbol);
-        String channel   = depth <= 5 ? "books5" : depth <= 50 ? "books" : "books-l2-tbt";
-        URI    uri       = URI.create(urls.wsBase());
-        String subMsg    = """
+        String instId  = toSwapSymbol(symbol);
+        String channel = depth <= 5 ? "books5" : "books";
+        URI    uri     = URI.create(urls.wsBase());
+        String subMsg  = """
             {"op":"subscribe","args":[{"channel":"%s","instId":"%s"}]}
             """.formatted(channel, instId).strip();
 
         Sinks.Many<OrderBook> sink = Sinks.many().multicast().onBackpressureBuffer();
         ReactorNettyWebSocketClient wsClient = new ReactorNettyWebSocketClient();
 
-        // Local book state
         java.util.concurrent.ConcurrentSkipListMap<BigDecimal, BigDecimal> localBids =
             new java.util.concurrent.ConcurrentSkipListMap<>(java.util.Collections.reverseOrder());
         java.util.concurrent.ConcurrentSkipListMap<BigDecimal, BigDecimal> localAsks =
@@ -156,7 +151,7 @@ public class OkxMarket implements Market {
                     .thenMany(session.receive()
                         .map(msg -> msg.getPayloadAsText())
                         .filter(json -> json.contains("\"books"))
-                        .flatMap(json -> parseOkxBook(json, symbol, depth, localBids, localAsks)))
+                        .flatMap(json -> parseBook(json, symbol, depth, localBids, localAsks)))
                     .doOnNext(sink::tryEmitNext)
                     .then()
             ).subscribe();
@@ -167,7 +162,7 @@ public class OkxMarket implements Market {
             .doBeforeRetry(s -> { localBids.clear(); localAsks.clear(); }));
     }
 
-    private Mono<OrderBook> parseOkxBook(
+    private Mono<OrderBook> parseBook(
             String json, String symbol, int depth,
             java.util.concurrent.ConcurrentSkipListMap<BigDecimal, BigDecimal> bids,
             java.util.concurrent.ConcurrentSkipListMap<BigDecimal, BigDecimal> asks) {
@@ -176,24 +171,16 @@ public class OkxMarket implements Market {
             JsonNode data = root.path("data");
             if (!data.isArray() || data.isEmpty()) return null;
             JsonNode d = data.get(0);
-
-            // "snapshot" replaces entire book; "update" applies diffs
-            String action = root.path("action").asText("snapshot");
-            if ("snapshot".equals(action)) { bids.clear(); asks.clear(); }
-
-            applyOkxLevels(d.path("bids"), bids, depth);
-            applyOkxLevels(d.path("asks"), asks, depth);
+            if ("snapshot".equals(root.path("action").asText())) { bids.clear(); asks.clear(); }
+            applyLevels(d.path("bids"), bids, depth);
+            applyLevels(d.path("asks"), asks, depth);
             if (bids.isEmpty() || asks.isEmpty()) return null;
-
             return new OrderBook(symbol, bids,
-                asks, d.path("seqId").asLong(0), Instant.now());
-        }).onErrorResume(e -> {
-            log.error("[OKX] Order book parse error: {}", e.getMessage());
-            return Mono.empty();
-        }).filter(ob -> ob != null);
+                asks, 0, Instant.now());
+        }).onErrorResume(e -> Mono.empty()).filter(ob -> ob != null);
     }
 
-    private void applyOkxLevels(JsonNode levels,
+    private void applyLevels(JsonNode levels,
             java.util.concurrent.ConcurrentSkipListMap<BigDecimal, BigDecimal> map, int depth) {
         if (!levels.isArray()) return;
         for (JsonNode level : levels) {
@@ -206,42 +193,36 @@ public class OkxMarket implements Market {
     }
 
     // -------------------------------------------------------------------------
-    // Account state — GET /api/v5/account/balance
+    // Account — GET /api/v5/account/balance
     // -------------------------------------------------------------------------
 
     @Override
     public Mono<AccountState> fetchAccountState() {
         String path      = urls.accountPath();
         String timestamp = ISO_UTC.format(Instant.now());
-        String signature = sign(timestamp, "GET", path, "");
+        String sig       = sign(timestamp, "GET", path, "");
 
         return webClient.get()
             .uri(urls.restBase() + path)
-            .header("OK-ACCESS-KEY",        apiKey)
-            .header("OK-ACCESS-SIGN",       signature)
-            .header("OK-ACCESS-TIMESTAMP",  timestamp)
-            .header("OK-ACCESS-PASSPHRASE", passphrase)
+            .headers(h -> okxHeaders(h, timestamp, sig))
             .retrieve()
             .bodyToMono(JsonNode.class)
             .map(root -> {
                 Map<String, BigDecimal> balances = new HashMap<>();
-                JsonNode details = root.path("data").path(0).path("details");
-                for (JsonNode item : details) {
+                for (JsonNode item : root.path("data").path(0).path("details")) {
                     BigDecimal avail = new BigDecimal(item.get("availBal").asText());
                     if (avail.compareTo(BigDecimal.ZERO) > 0)
                         balances.put(item.get("ccy").asText(), avail);
                 }
                 return AccountState.builder()
-                    .balances(balances)
-                    .openOrders(Map.of())
-                    .snapshotTime(Instant.now())
-                    .build();
+                    .balances(balances).openOrders(Map.of())
+                    .snapshotTime(Instant.now()).build();
             })
-            .doOnError(e -> log.error("[OKX] fetchAccountState failed: {}", e.getMessage()));
+            .doOnError(e -> log.error("[OKX Futures] fetchAccountState failed: {}", e.getMessage()));
     }
 
     // -------------------------------------------------------------------------
-    // Order submission — POST /api/v5/trade/order
+    // Orders — POST /api/v5/trade/order
     // -------------------------------------------------------------------------
 
     @Override
@@ -249,28 +230,22 @@ public class OkxMarket implements Market {
         String path      = urls.orderPath();
         String timestamp = ISO_UTC.format(Instant.now());
         String body      = buildOrderBody(order);
-        String signature = sign(timestamp, "POST", path, body);
+        String sig       = sign(timestamp, "POST", path, body);
 
         return webClient.post()
             .uri(urls.restBase() + path)
-            .header("OK-ACCESS-KEY",        apiKey)
-            .header("OK-ACCESS-SIGN",       signature)
-            .header("OK-ACCESS-TIMESTAMP",  timestamp)
-            .header("OK-ACCESS-PASSPHRASE", passphrase)
-            .header("Content-Type",         "application/json")
+            .headers(h -> { okxHeaders(h, timestamp, sig); h.set("Content-Type", "application/json"); })
             .bodyValue(body)
             .retrieve()
             .bodyToMono(JsonNode.class)
-            .map(root -> {
-                JsonNode data = root.path("data").path(0);
-                return order.toBuilder()
-                    .exchangeOrderId(data.get("ordId").asText())
-                    .status(Order.Status.PENDING)
-                    .updatedAt(Instant.now())
-                    .build();
-            })
-            .doOnNext(o  -> log.info("[OKX] Order submitted: {}", o.clientOrderId()))
-            .doOnError(e -> log.error("[OKX] submitOrder failed: {}", e.getMessage()));
+            .map(root -> order.toBuilder()
+                .exchangeOrderId(root.path("data").path(0).get("ordId").asText())
+                .status(Order.Status.PENDING)
+                .updatedAt(Instant.now())
+                .build())
+            .doOnNext(o  -> log.info("[OKX Futures] Order submitted: {} leverage={}x posSide={}",
+                o.clientOrderId(), order.leverage(), order.positionSide()))
+            .doOnError(e -> log.error("[OKX Futures] submitOrder failed: {}", e.getMessage()));
     }
 
     @Override
@@ -278,15 +253,11 @@ public class OkxMarket implements Market {
         String path      = urls.orderPath() + "/cancel";
         String timestamp = ISO_UTC.format(Instant.now());
         String body      = "{\"clOrdId\":\"%s\"}".formatted(clientOrderId);
-        String signature = sign(timestamp, "POST", path, body);
+        String sig       = sign(timestamp, "POST", path, body);
 
         return webClient.post()
             .uri(urls.restBase() + path)
-            .header("OK-ACCESS-KEY",        apiKey)
-            .header("OK-ACCESS-SIGN",       signature)
-            .header("OK-ACCESS-TIMESTAMP",  timestamp)
-            .header("OK-ACCESS-PASSPHRASE", passphrase)
-            .header("Content-Type",         "application/json")
+            .headers(h -> { okxHeaders(h, timestamp, sig); h.set("Content-Type", "application/json"); })
             .bodyValue(body)
             .retrieve()
             .bodyToMono(JsonNode.class)
@@ -294,51 +265,137 @@ public class OkxMarket implements Market {
                 .clientOrderId(clientOrderId)
                 .exchangeOrderId(root.path("data").path(0).path("ordId").asText())
                 .status(Order.Status.CANCELLED)
-                .updatedAt(Instant.now())
-                .build())
-            .doOnNext(o  -> log.info("[OKX] Order cancelled: {}", clientOrderId))
-            .doOnError(e -> log.error("[OKX] cancelOrder failed: {}", e.getMessage()));
+                .updatedAt(Instant.now()).build())
+            .doOnError(e -> log.error("[OKX Futures] cancelOrder failed: {}", e.getMessage()));
+    }
+
+    // -------------------------------------------------------------------------
+    // Futures-specific
+    // -------------------------------------------------------------------------
+
+    @Override
+    public Mono<Void> setLeverage(String symbol, int leverage) {
+        String path      = "/api/v5/account/set-leverage";
+        String timestamp = ISO_UTC.format(Instant.now());
+        String body      = """
+            {"instId":"%s","lever":"%d","mgnMode":"cross"}
+            """.formatted(toSwapSymbol(symbol), leverage).strip();
+        String sig = sign(timestamp, "POST", path, body);
+
+        return webClient.post()
+            .uri(urls.restBase() + path)
+            .headers(h -> { okxHeaders(h, timestamp, sig); h.set("Content-Type", "application/json"); })
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(Void.class)
+            .doOnSuccess(v -> log.info("[OKX Futures] Leverage set: {}x for {}", leverage, symbol))
+            .doOnError(e  -> log.error("[OKX Futures] setLeverage failed: {}", e.getMessage()));
+    }
+
+    @Override
+    public Mono<Void> setPositionMode(boolean hedgeMode) {
+        String path      = "/api/v5/account/set-position-mode";
+        String timestamp = ISO_UTC.format(Instant.now());
+        String posMode   = hedgeMode ? "long_short_mode" : "net_mode";
+        String body      = "{\"posMode\":\"%s\"}".formatted(posMode);
+        String sig       = sign(timestamp, "POST", path, body);
+
+        return webClient.post()
+            .uri(urls.restBase() + path)
+            .headers(h -> { okxHeaders(h, timestamp, sig); h.set("Content-Type", "application/json"); })
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(Void.class)
+            .doOnSuccess(v -> log.info("[OKX Futures] Position mode: {}", posMode))
+            .doOnError(e  -> log.error("[OKX Futures] setPositionMode failed: {}", e.getMessage()));
+    }
+
+    @Override
+    public Mono<Order> closePosition(String symbol, Order.PositionSide positionSide) {
+        String path      = urls.orderPath();
+        String timestamp = ISO_UTC.format(Instant.now());
+        // Opposite side to close: LONG → sell, SHORT → buy
+        String side = positionSide == Order.PositionSide.LONG ? "sell" : "buy";
+        String posSide = switch (positionSide) {
+            case LONG  -> "long";
+            case SHORT -> "short";
+            default    -> "net";
+        };
+        String body = """
+            {"instId":"%s","tdMode":"cross","side":"%s","posSide":"%s",
+             "ordType":"market","sz":"0","reduceOnly":true}
+            """.formatted(toSwapSymbol(symbol), side, posSide).strip();
+        String sig = sign(timestamp, "POST", path, body);
+
+        return webClient.post()
+            .uri(urls.restBase() + path)
+            .headers(h -> { okxHeaders(h, timestamp, sig); h.set("Content-Type", "application/json"); })
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(JsonNode.class)
+            .map(root -> Order.builder()
+                .symbol(symbol)
+                .side(side.equals("sell") ? Order.Side.SELL : Order.Side.BUY)
+                .type(Order.Type.MARKET)
+                .positionSide(positionSide).reduceOnly(true)
+                .exchangeOrderId(root.path("data").path(0).path("ordId").asText())
+                .status(Order.Status.PENDING)
+                .createdAt(Instant.now()).updatedAt(Instant.now()).build())
+            .doOnNext(o -> log.info("[OKX Futures] Close position submitted: {} {}", side, symbol))
+            .doOnError(e -> log.error("[OKX Futures] closePosition failed: {}", e.getMessage()));
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Convert "BTCUSDT" → "BTC-USDT" for OKX. */
-    private String toOkxSymbol(String symbol) {
-        if (symbol.contains("-")) return symbol; // already OKX format
-        if (symbol.endsWith("USDT")) return symbol.replace("USDT", "-USDT");
-        if (symbol.endsWith("BTC"))  return symbol.replace("BTC",  "-BTC");
-        if (symbol.endsWith("ETH"))  return symbol.replace("ETH",  "-ETH");
-        return symbol; // fallback — pass as-is
+    /** "BTCUSDT" → "BTC-USDT-SWAP" */
+    private String toSwapSymbol(String symbol) {
+        if (symbol.contains("-")) return symbol.endsWith("-SWAP") ? symbol : symbol + "-SWAP";
+        if (symbol.endsWith("USDT")) return symbol.replace("USDT", "-USDT-SWAP");
+        return symbol;
     }
 
     private String buildOrderBody(Order order) {
         String ordType = order.type() == Order.Type.LIMIT ? "limit" : "market";
-        String side    = order.side().name().toLowerCase();
+        String posSide = order.positionSide() != null
+            ? switch (order.positionSide()) {
+                case LONG  -> "long";
+                case SHORT -> "short";
+                default    -> "net";
+              }
+            : "net";
         StringBuilder sb = new StringBuilder("{");
-        sb.append("\"instId\":\"").append(toOkxSymbol(order.symbol())).append("\",");
-        sb.append("\"tdMode\":\"cash\",");
-        sb.append("\"side\":\"").append(side).append("\",");
+        sb.append("\"instId\":\"").append(toSwapSymbol(order.symbol())).append("\",");
+        sb.append("\"tdMode\":\"cross\",");
+        sb.append("\"side\":\"").append(order.side().name().toLowerCase()).append("\",");
+        sb.append("\"posSide\":\"").append(posSide).append("\",");
         sb.append("\"ordType\":\"").append(ordType).append("\",");
         sb.append("\"sz\":\"").append(order.quantity().toPlainString()).append("\",");
         sb.append("\"clOrdId\":\"").append(order.clientOrderId()).append("\"");
         if (order.type() == Order.Type.LIMIT && order.limitPrice() != null)
             sb.append(",\"px\":\"").append(order.limitPrice().toPlainString()).append("\"");
+        if (Boolean.TRUE.equals(order.reduceOnly()))
+            sb.append(",\"reduceOnly\":true");
         sb.append("}");
         return sb.toString();
     }
 
-    /**
-     * OKX signature: Base64( HMAC-SHA256( timestamp + method + requestPath + body ) )
-     */
+    private void okxHeaders(org.springframework.http.HttpHeaders h,
+                             String timestamp, String sig) {
+        h.set("OK-ACCESS-KEY",        apiKey);
+        h.set("OK-ACCESS-SIGN",       sig);
+        h.set("OK-ACCESS-TIMESTAMP",  timestamp);
+        h.set("OK-ACCESS-PASSPHRASE", passphrase);
+    }
+
     private String sign(String timestamp, String method, String path, String body) {
         try {
             String prehash = timestamp + method.toUpperCase() + path + body;
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] hash = mac.doFinal(prehash.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(hash);
+            return Base64.getEncoder().encodeToString(
+                mac.doFinal(prehash.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new IllegalStateException("OKX signing failed", e);
         }

@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * Utility to sign Binance REST API query strings with HMAC-SHA256.
  */
-final class HmacSigner {
+public final class HmacSigner {
 
     private HmacSigner() {}
 

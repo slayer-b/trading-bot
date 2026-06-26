@@ -1,7 +1,7 @@
 package com.tradingbot.account;
 
 import com.tradingbot.market.Market;
-import com.tradingbot.market.NoTradeFuturesMarket;
+import com.tradingbot.market.impl.NoTradeFuturesMarket;
 import com.tradingbot.model.AccountState;
 import com.tradingbot.model.BalanceHistory;
 import com.tradingbot.model.Order;

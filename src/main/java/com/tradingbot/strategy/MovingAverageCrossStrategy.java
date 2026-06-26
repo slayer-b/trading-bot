@@ -5,6 +5,8 @@ import com.tradingbot.model.Candle;
 import com.tradingbot.model.Signal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -27,12 +29,14 @@ import java.time.Instant;
  * fast EMA covers 45 minutes and the slow EMA covers 105 minutes of history
  * — far more meaningful than reacting to individual ticks.
  */
+@Component("ema") // Matches "strategyName: ema" inside application.yml
+@Scope("prototype") // Prevents indicators cross-wire calculation leaks between different tokens
 public class MovingAverageCrossStrategy implements TradingStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(MovingAverageCrossStrategy.class);
 
-    private final int        fastPeriod;
-    private final int        slowPeriod;
+    private final int fastPeriod;
+    private final int slowPeriod;
     private final BigDecimal usdtAmount;
 
     private BigDecimal fastEma = null;
@@ -49,30 +53,35 @@ public class MovingAverageCrossStrategy implements TradingStrategy {
         this(9, 21, usdtAmount);
     }
 
+//    @Override
+//    public String name() {
+//        return "EMA-Cross(%d/%d)".formatted(fastPeriod, slowPeriod);
+//    }
+
     @Override
     public String name() {
-        return "EMA-Cross(%d/%d)".formatted(fastPeriod, slowPeriod);
+        return "ema";
     }
 
     @Override
     public Flux<Signal> evaluate(Flux<Candle> candles, Mono<AccountState> accountState, String symbol) {
         return candles
-            .map(candle -> {
-                Signal.Action action = processCandle(candle);
-                log.debug("[{}] Candle {} C={} fast={} slow={} → {}",
-                    name(), candle.openTime(), candle.close(), fastEma, slowEma, action);
-                return action;
-            })
-            .filter(action -> action != Signal.Action.HOLD)
-            .map(action -> Signal.builder()
-                .action(action)
-                .symbol(symbol)
-                .usdtAmount(usdtAmount)
-                .reason("EMA-Cross(%d/%d) — fast=%.2f slow=%.2f"
-                    .formatted(fastPeriod, slowPeriod, fastEma, slowEma))
-                .timestamp(Instant.now())
-                .build())
-            .doOnNext(s -> log.info("[{}] Signal: {} — {}", name(), s.action(), s.reason()));
+                .map(candle -> {
+                    Signal.Action action = processCandle(candle);
+                    log.debug("[{}] Candle {} C={} fast={} slow={} → {}",
+                            name(), candle.openTime(), candle.close(), fastEma, slowEma, action);
+                    return action;
+                })
+                .filter(action -> action != Signal.Action.HOLD)
+                .map(action -> Signal.builder()
+                        .action(action)
+                        .symbol(symbol)
+                        .usdtAmount(usdtAmount)
+                        .reason("EMA-Cross(%d/%d) — fast=%.2f slow=%.2f"
+                                .formatted(fastPeriod, slowPeriod, fastEma, slowEma))
+                        .timestamp(Instant.now())
+                        .build())
+                .doOnNext(s -> log.info("[{}] Signal: {} — {}", name(), s.action(), s.reason()));
     }
 
     // -------------------------------------------------------------------------
@@ -96,13 +105,13 @@ public class MovingAverageCrossStrategy implements TradingStrategy {
         BigDecimal newSlow = close.multiply(ms, mc).add(slowEma.multiply(BigDecimal.ONE.subtract(ms), mc));
 
         boolean wasFastAbove = fastEma.compareTo(slowEma) > 0;
-        boolean isFastAbove  = newFast.compareTo(newSlow) > 0;
+        boolean isFastAbove = newFast.compareTo(newSlow) > 0;
 
         fastEma = newFast;
         slowEma = newSlow;
 
-        if (!wasFastAbove && isFastAbove)  return Signal.Action.BUY;
-        if (wasFastAbove  && !isFastAbove) return Signal.Action.SELL;
+        if (!wasFastAbove && isFastAbove) return Signal.Action.BUY;
+        if (wasFastAbove && !isFastAbove) return Signal.Action.SELL;
         return Signal.Action.HOLD;
     }
 }

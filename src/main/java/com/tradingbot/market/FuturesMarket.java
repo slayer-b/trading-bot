@@ -1,5 +1,8 @@
 package com.tradingbot.market;
 
+import com.tradingbot.market.impl.BinanceFuturesMarket;
+import com.tradingbot.market.impl.NoTradeFuturesMarket;
+import com.tradingbot.market.impl.OkxFuturesMarket;
 import com.tradingbot.model.Order;
 import reactor.core.publisher.Mono;
 

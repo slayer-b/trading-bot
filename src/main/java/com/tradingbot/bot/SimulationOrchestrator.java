@@ -2,8 +2,13 @@ package com.tradingbot.bot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tradingbot.core.TradingEngine;
+import com.tradingbot.market.Market;
+import com.tradingbot.service.HistoryService;
+import com.tradingbot.strategy.BreakoutRetestStrategy;
+import com.tradingbot.strategy.TradingStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
@@ -35,6 +40,9 @@ import java.util.Map;
 @Component
 public class SimulationOrchestrator {
 
+    @Autowired
+    private HistoryService historyService;
+
     private static final Logger log = LoggerFactory.getLogger(SimulationOrchestrator.class);
 
     private final WebClient          webClient;
@@ -65,9 +73,8 @@ public class SimulationOrchestrator {
         log.info("[Orchestrator] Starting {} bot(s) for {} minutes",
             configs.size(), common.simulationDurationMinutes());
 
-        BotFactory factory = new BotFactory(webClient, objectMapper, appContext);
         List<TradingEngine> engines = configs.stream()
-            .map(factory::create)
+            .map((BotConfig cfg) -> botFactory.create(cfg, historyService))
             .toList();
 
         // Start all bots in parallel

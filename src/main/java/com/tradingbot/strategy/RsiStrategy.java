@@ -5,6 +5,8 @@ import com.tradingbot.model.Candle;
 import com.tradingbot.model.Signal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -22,6 +24,8 @@ import java.time.Instant;
  * <p>Uses Wilder's smoothed RSI, standard 14-candle period.
  * On a 5m timeframe, 14 candles = 70 minutes of history.
  */
+@Component("rsi") // Matches "strategyName: rsi" inside application.yml
+@Scope("prototype") // State isolation for concurrent asset scanning
 public class RsiStrategy implements TradingStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(RsiStrategy.class);
@@ -49,9 +53,13 @@ public class RsiStrategy implements TradingStrategy {
         this(14, 30.0, 70.0, usdtAmount);
     }
 
+//    @Override
+//    public String name() {
+//        return "RSI(%d, %.0f/%.0f)".formatted(period, oversold, overbought);
+//    }
     @Override
     public String name() {
-        return "RSI(%d, %.0f/%.0f)".formatted(period, oversold, overbought);
+        return "rsi";
     }
 
     @Override

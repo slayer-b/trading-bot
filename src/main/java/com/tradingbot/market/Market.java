@@ -1,6 +1,7 @@
 package com.tradingbot.market;
 
 import com.tradingbot.model.AccountState;
+import com.tradingbot.model.Candle;
 import com.tradingbot.model.Order;
 import com.tradingbot.model.OrderBook;
 import com.tradingbot.model.Tick;
@@ -9,9 +10,6 @@ import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 
-/**
- * Abstraction over any trading venue (real or simulated).
- */
 public interface Market {
 
     String name();
@@ -38,4 +36,13 @@ public interface Market {
     Mono<Order> submitOrder(Order order);
 
     Mono<Order> cancelOrder(String clientOrderId);
+
+    /**
+     * Fetches a historical stream of 5m candles for the specified asset pair directly from this market provider.
+     *
+     * @param symbol The asset ticker symbol (e.g., "SOLUSDT")
+     * @param days   The number of days of history to retrieve
+     * @return A stream of sorted candles (from oldest to newest)
+     */
+    Flux<Candle> fetchHistory(String symbol, int days);
 }

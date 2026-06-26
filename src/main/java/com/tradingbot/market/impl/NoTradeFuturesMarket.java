@@ -1,7 +1,8 @@
-package com.tradingbot.market;
+package com.tradingbot.market.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tradingbot.market.FuturesMarket;
 import com.tradingbot.market.config.MarketUrls;
 import com.tradingbot.model.AccountState;
 import com.tradingbot.model.Order;
