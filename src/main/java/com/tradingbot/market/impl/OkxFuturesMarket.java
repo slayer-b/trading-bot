@@ -400,4 +400,66 @@ public class OkxFuturesMarket implements FuturesMarket {
             throw new IllegalStateException("OKX signing failed", e);
         }
     }
+
+    /**
+     * Fetches historical 5m candles for the specified asset pair from OKX Futures (SWAP/Perpetual) REST API.
+     */
+    @Override
+    public reactor.core.publisher.Flux<com.tradingbot.model.Candle> fetchHistory(java.lang.String symbol, int days) {
+        long afterMs = java.time.LocalDateTime.now()
+                .minusDays(days)
+                .toInstant(java.time.ZoneOffset.UTC)
+                .toEpochMilli();
+
+        java.lang.String okxFuturesSymbol = symbol;
+        if (!okxFuturesSymbol.contains("-")) {
+            okxFuturesSymbol = okxFuturesSymbol.replace("USDT", "-USDT-SWAP").replace("USDC", "-USDC-SWAP");
+        }
+
+        final java.lang.String finalSymbol = okxFuturesSymbol;
+        System.out.println("[OKX FUTURES MARKET] Fetching warm-up candle buffer from REST API for: " + finalSymbol);
+
+        return this.webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v5/market/history-candles")
+                        .queryParam("instId", finalSymbol)
+                        .queryParam("bar", "5m")
+                        .queryParam("after", afterMs)
+                        .queryParam("limit", "300")
+                        .build())
+                .retrieve()
+                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<java.util.Map<java.lang.String, java.lang.Object>>() {})
+                .flatMapMany(response -> {
+                    if (!"0".equals(response.get("code"))) {
+                        System.err.println("[OKX FUTURES ERROR] REST endpoint returned code error: " + response.get("msg"));
+                        return reactor.core.publisher.Flux.empty();
+                    }
+                    java.util.List<java.util.List<java.lang.String>> data = (java.util.List<java.util.List<java.lang.String>>) response.getOrDefault("data", java.util.Collections.emptyList());
+
+                    return reactor.core.publisher.Flux.fromIterable(data)
+                            .map(raw -> {
+                                java.time.LocalDateTime openTime = java.time.LocalDateTime.ofInstant(
+                                        java.time.Instant.ofEpochMilli(java.lang.Long.parseLong(raw.get(0))),
+                                        java.time.ZoneOffset.UTC
+                                );
+                                return com.tradingbot.model.Candle.builder()
+                                        .symbol(symbol)
+                                        .openTime(openTime)
+                                        .closeTime(openTime.plusMinutes(5))
+                                        .open(new java.math.BigDecimal(raw.get(1)))
+                                        .high(new java.math.BigDecimal(raw.get(2)))
+                                        .low(new java.math.BigDecimal(raw.get(3)))
+                                        .close(new java.math.BigDecimal(raw.get(4)))
+                                        .volume(new java.math.BigDecimal(raw.get(5)))
+                                        .timeframe(java.time.Duration.ofMinutes(5))
+                                        .build();
+                            })
+                            .sort((c1, c2) -> c1.openTime().compareTo(c2.openTime()));
+                })
+                .onErrorResume(e -> {
+                    System.err.println("[OKX FUTURES ERROR] Connection failed for " + symbol + ": " + e.getMessage());
+                    return reactor.core.publisher.Flux.empty();
+                });
+    }
+
 }

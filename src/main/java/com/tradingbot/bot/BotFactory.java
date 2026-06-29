@@ -1,5 +1,7 @@
 package com.tradingbot.bot;
 
+import com.tradingbot.core.TradingEngine;
+import com.tradingbot.service.HistoryService;
 import com.tradingbot.strategy.BreakoutRetestStrategy;
 import com.tradingbot.strategy.TradingStrategy;
 import org.springframework.context.ApplicationContext;
@@ -20,6 +22,30 @@ public class BotFactory {
      */
     public BotFactory(ApplicationContext appContext) {
         this.appContext = appContext;
+    }
+
+    /**
+     * Explicitly manufactures and wires an independent state-isolated TradingEngine instance.
+     * Maps the incoming BotConfig profile to its required background resources.
+     *
+     * @param cfg            The configuration profile for a specific asset tracking instance
+     * @param historyService Legacy parameter maintained to preserve structural compatibility
+     * @return A fresh, standalone prototype TradingEngine session container
+     */
+    public TradingEngine createTradingEngine(BotConfig cfg, HistoryService historyService) {
+        if (cfg == null) {
+            throw new IllegalArgumentException("BotConfig deployment profile profile details cannot be null");
+        }
+
+        System.out.println("[FACTORY] Manufacturing isolated TradingEngine thread context for symbol: " + cfg.symbol());
+
+        // 1. Fetch a completely fresh, state-isolated prototype copy of TradingEngine from Spring Context
+        TradingEngine isolatedEngineInstance = appContext.getBean(TradingEngine.class);
+
+        // 2. Provision and wire the concrete running configuration data directly into the active instance
+        isolatedEngineInstance.initEngineSession(cfg);
+
+        return isolatedEngineInstance;
     }
 
     /**

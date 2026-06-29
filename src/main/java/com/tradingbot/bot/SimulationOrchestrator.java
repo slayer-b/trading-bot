@@ -42,6 +42,8 @@ public class SimulationOrchestrator {
 
     @Autowired
     private HistoryService historyService;
+    @Autowired
+    private BotFactory botFactory;
 
     private static final Logger log = LoggerFactory.getLogger(SimulationOrchestrator.class);
 
@@ -74,7 +76,7 @@ public class SimulationOrchestrator {
             configs.size(), common.simulationDurationMinutes());
 
         List<TradingEngine> engines = configs.stream()
-            .map((BotConfig cfg) -> botFactory.create(cfg, historyService))
+                .map((BotConfig cfg) -> botFactory.createTradingEngine(cfg, historyService))
             .toList();
 
         // Start all bots in parallel

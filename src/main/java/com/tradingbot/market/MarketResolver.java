@@ -5,6 +5,7 @@ import com.tradingbot.market.config.MarketUrls;
 import com.tradingbot.market.impl.NoTradeMarket;
 import com.tradingbot.market.impl.OkxMarket;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -38,7 +39,7 @@ public class MarketResolver {
     /**
      * Resolves, instantiates with respective credentials, and caches the appropriate Market environment.
      *
-     * @param marketConfigString Raw string value from configuration (e.g., "okx", "okx-notrade", "binance")
+     * @param marketConfigString Raw string value from configuration (e.g., "okx", "okx-notrade", "binance-notrade")
      * @return Fully prepared and cached Market instance
      */
     public Market resolveMarket(String marketConfigString) {
@@ -53,10 +54,13 @@ public class MarketResolver {
 
             Market baseExchangeMarket = null;
 
-            // Branching via decoupled string checks
-            if (configKey.contains("okx")) {
-                // Safely extract market environment specific configuration properties via Spring Environment or custom context beans
-                org.springframework.core.env.Environment env = appContext.getEnvironment();
+            // Extract the base market token prefix safely (e.g. maps "binance-notrade" down to string token "binance")
+            String[] parts = configKey.split("-");
+            String baseMarketKey = parts.length > 0 ? parts[0] : configKey;
+
+            // Branch 1: Handle OKX environment dynamic loading
+            if ("okx".equals(baseMarketKey)) {
+                Environment env = appContext.getEnvironment();
 
                 String apiKey = env.getProperty("trading.okx.api-key", "");
                 String secretKey = env.getProperty("trading.okx.secret-key", "");
@@ -65,10 +69,13 @@ public class MarketResolver {
                 String commissionStr = env.getProperty("trading.okx.commission-rate", "0.001");
                 BigDecimal commissionRate = new BigDecimal(commissionStr);
 
-                // Fetching MarketUrls bean directly from the active context
-                MarketUrls marketUrls = appContext.getBean(MarketUrls.class);
+                MarketUrls marketUrls = null;
+                try {
+                    marketUrls = appContext.getBean(MarketUrls.class);
+                } catch (Exception e) {
+                    System.err.println("[MARKET-RESOLVER WARN] MarketUrls bean not found in context.");
+                }
 
-                // Instantiate OkxMarket directly with its dynamic parameters resolved on demand
                 baseExchangeMarket = new OkxMarket(
                         this.webClient,
                         this.objectMapper,
@@ -79,11 +86,23 @@ public class MarketResolver {
                         commissionRate
                 );
 
-            } else if (configKey.contains("binance")) {
-                // Future expansion block: Binance parameters would be fetched dynamically from 'trading.binance.*' keys
-                // baseExchangeMarket = new BinanceMarket(this.webClient, this.objectMapper, ...);
+                // Branch 2: FIX - Dynamically resolve your existing Binance beans from Spring Context
+            } else if ("binance".equals(baseMarketKey)) {
+                try {
+                    // Try to look up the exact production Spot or Futures bean from your existing codebase
+                    if (configKey.contains("futures")) {
+                        baseExchangeMarket = appContext.getBean("binanceFuturesMarket", Market.class);
+                    } else {
+                        // Fallback to spot client bean
+                        baseExchangeMarket = appContext.getBean("binanceMarket", Market.class);
+                    }
+                    System.out.println("[MARKET-RESOLVER] Successfully hooked into existing Spring bean: " + baseExchangeMarket.name());
+                } catch (Exception e) {
+                    System.err.println("[MARKET-RESOLVER ERROR] Failed to fetch Binance bean from Spring context: " + e.getMessage());
+                }
             }
 
+            // Fallback guard if resolution didn't hit any registered infrastructure layers
             if (baseExchangeMarket == null) {
                 throw new IllegalStateException("Failed to resolve base exchange market implementation for configuration: " + configKey);
             }

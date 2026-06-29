@@ -283,4 +283,31 @@ public class NoTradeFuturesMarket implements FuturesMarket {
     private String positionKey(String symbol, Order.PositionSide side) {
         return symbol + ":" + (side != null ? side : Order.PositionSide.BOTH);
     }
+
+    /**
+     * Fetches historical 5m candles for the simulation profile by resolving
+     * the underlying real futures exchange stream dynamically via MarketResolver.
+     */
+    @Override
+    public reactor.core.publisher.Flux<com.tradingbot.model.Candle> fetchHistory(java.lang.String symbol, int days) {
+        try {
+            // Retrieve the active resolver bean straight from the Spring context instance lookup map
+            com.tradingbot.market.MarketResolver resolver = org.springframework.web.context.ContextLoader
+                    .getCurrentWebApplicationContext()
+                    .getBean(com.tradingbot.market.MarketResolver.class);
+
+            // Fallback resolver query extraction
+            java.lang.String activeKey = this.name() != null ? this.name() : "okx";
+            java.lang.String cleanKey = activeKey.toLowerCase().replace("notrade-", "").split("-")[0];
+
+            com.tradingbot.market.Market realExchangeMarket = resolver.resolveMarket(cleanKey);
+            if (realExchangeMarket != null) {
+                return realExchangeMarket.fetchHistory(symbol, days);
+            }
+        } catch (java.lang.Exception e) {
+            System.err.println("[FUTURES SIMULATOR] Dynamic history resolution failed, fallback to empty: " + e.getMessage());
+        }
+        return reactor.core.publisher.Flux.empty();
+    }
+
 }

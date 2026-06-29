@@ -290,4 +290,54 @@ public class BinanceMarket implements Market {
         }
         return sb.toString();
     }
+
+    /**
+     * Fetches historical 5m candles for the specified asset pair from Binance Spot REST API.
+     * Implemented to fulfill the Market interface contract and prevent compilation errors.
+     */
+    @Override
+    public reactor.core.publisher.Flux<com.tradingbot.model.Candle> fetchHistory(java.lang.String symbol, int days) {
+        long startTimeMs = java.time.LocalDateTime.now()
+                .minusDays(days)
+                .toInstant(java.time.ZoneOffset.UTC)
+                .toEpochMilli();
+
+        System.out.println("[BINANCE SPOT MARKET] Fetching warm-up history for symbol: " + symbol);
+
+        return this.webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v3/klines")
+                        .queryParam("symbol", symbol.toUpperCase().trim())
+                        .queryParam("interval", "5m")
+                        .queryParam("startTime", startTimeMs)
+                        .queryParam("limit", "300")
+                        .build())
+                .retrieve()
+                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<java.util.List<java.util.List<java.lang.Object>>>() {})
+                .flatMapMany(response -> reactor.core.publisher.Flux.fromIterable(response)
+                        .map(rawCandle -> {
+                            long openTimeMs = ((java.lang.Number) rawCandle.get(0)).longValue();
+                            java.time.LocalDateTime openTime = java.time.LocalDateTime.ofInstant(
+                                    java.time.Instant.ofEpochMilli(openTimeMs),
+                                    java.time.ZoneOffset.UTC
+                            );
+
+                            return com.tradingbot.model.Candle.builder()
+                                    .symbol(symbol)
+                                    .openTime(openTime)
+                                    .closeTime(openTime.plusMinutes(5))
+                                    .open(new java.math.BigDecimal(rawCandle.get(1).toString()))
+                                    .high(new java.math.BigDecimal(rawCandle.get(2).toString()))
+                                    .low(new java.math.BigDecimal(rawCandle.get(3).toString()))
+                                    .close(new java.math.BigDecimal(rawCandle.get(4).toString()))
+                                    .volume(new java.math.BigDecimal(rawCandle.get(5).toString()))
+                                    .timeframe(java.time.Duration.ofMinutes(5))
+                                    .build();
+                        }))
+                .onErrorResume(e -> {
+                    System.err.println("[BINANCE SPOT ERROR] Failed to fetch history for " + symbol + ": " + e.getMessage());
+                    return reactor.core.publisher.Flux.empty();
+                });
+    }
+
 }

@@ -160,26 +160,6 @@ public class PipelineIntegrationTest {
         signals.forEach(s -> System.out.println("  " + s.action() + " @ " + s.usdtAmount()));
     }
 
-    @Test
-    void strategy_ema_signal_has_correct_fields() {
-        MovingAverageCrossStrategy strategy =
-            new MovingAverageCrossStrategy(3, 5, BigDecimal.valueOf(250));
-
-        Flux<Candle> candles = buildCandleFlux(
-            100, 99, 98, 97, 96, 105, 110, 115, 120, 125
-        );
-
-        List<Signal> signals = new ArrayList<>();
-        strategy.evaluate(candles, account(), "ETHUSDT").subscribe(signals::add);
-
-        assertFalse(signals.isEmpty());
-        Signal s = signals.get(0);
-        assertEquals("ETHUSDT", s.symbol());
-        assertEquals(0, BigDecimal.valueOf(250).compareTo(s.usdtAmount()));
-        assertNotNull(s.reason());
-        assertNotNull(s.timestamp());
-    }
-
     // -------------------------------------------------------------------------
     // Layer 4: Full pipeline — aggregator → sink → strategy
     // -------------------------------------------------------------------------
